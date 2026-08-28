@@ -6,7 +6,7 @@ import win32api
 import win32con
 import win32gui
 import pyautogui
-from pyvda import VirtualDesktop, get_virtual_desktops
+from pyvda import VirtualDesktop
 
 # ==============================================================================
 # BLOCO 0: UTILITÁRIOS E INFRAESTRUTURA (MICROFUNÇÕES E LOGS)
@@ -15,20 +15,6 @@ from pyvda import VirtualDesktop, get_virtual_desktops
 def pausa_curta(segundos: float = 0.5) -> None:
     """Microfunção para pequenas pausas de estabilização da interface."""
     time.sleep(segundos)
-
-
-def esperar_tela(termo_busca: str, timeout: int = 60, intervalo: float = 0.5):
-    """
-    Microfunção padronizada de espera de janelas.
-    Tempo limite padrão: 1 minuto (60 segundos).
-    """
-    tempo_inicio = time.time()
-    while (time.time() - tempo_inicio) < timeout:
-        janela = WindowManager.buscar_janela_por_titulo(termo_busca)
-        if janela:
-            return janela
-        time.sleep(intervalo)
-    return None
 
 
 class Logger:
@@ -53,15 +39,26 @@ class WindowManager:
     """Gerencia a busca e alteração de estado das janelas do Windows via Win32."""
 
     @staticmethod
-    def buscar_janela_por_titulo(termo_busca: str):
-        """Busca qualquer janela visível que contenha o termo informado."""
+    def buscar_janela_por_titulo(termo_busca: str | tuple | list):
+        """
+        Busca qualquer janela visível que contenha o termo informado.
+        Aceita uma única string ou uma lista/tupla de termos.
+        """
+        if isinstance(termo_busca, str):
+            termos = [termo_busca.lower()]
+        else:
+            termos = [t.lower() for t in termo_busca]
+
         resultado = []
         def callback(hwnd, extra):
             if win32gui.IsWindowVisible(hwnd):
                 titulo = win32gui.GetWindowText(hwnd)
-                if titulo and termo_busca.lower() in titulo.lower():
-                    resultado.append((hwnd, titulo))
+                if titulo:
+                    titulo_lower = titulo.lower()
+                    if any(termo in titulo_lower for termo in termos):
+                        resultado.append((hwnd, titulo))
             return True
+
         win32gui.EnumWindows(callback, None)
         return resultado[0] if resultado else None
 
@@ -74,52 +71,89 @@ class WindowManager:
         pausa_curta(0.5)
 
 
+def esperar_tela(termo_busca: str | tuple | list, timeout: int = 60, intervalo: float = 0.5):
+    """
+    Aguarda o surgimento de uma janela dentro do tempo limite.
+    Reaproveita o mecanismo de busca unificado do WindowManager.
+    """
+    tempo_inicio = time.time()
+    while (time.time() - tempo_inicio) < timeout:
+        janela = WindowManager.buscar_janela_por_titulo(termo_busca)
+        if janela:
+            return janela
+        time.sleep(intervalo)
+    return None
+
+
 # ==============================================================================
-# PASSO 1: PREPARAÇÃO DO AMBIENTE (ÁREA VIRTUAL)
+# PASSO 1: GERENCIAMENTO DE AMBIENTE E INICIALIZAÇÃO
 # ==============================================================================
 
 class DesktopManager:
-    """Prepara a Área de Trabalho Virtual limpa para a execução do robô."""
+    """Garante a execução no Desktop principal (Área de Trabalho 1)."""
 
     @staticmethod
-    def preparar_terceira_area(logger: Logger = None):
+    def ir_para_primeira_area(logger: Logger = None):
         try:
-            total_desktops = len(get_virtual_desktops())
-            if total_desktops >= 3:
-                while len(get_virtual_desktops()) >= 3:
-                    ultimo_indice = len(get_virtual_desktops())
-                    VirtualDesktop(ultimo_indice).remove()
-                    pausa_curta(0.2)
-
-            while len(get_virtual_desktops()) < 3:
-                VirtualDesktop.create()
-                pausa_curta(0.2)
-
-            VirtualDesktop(3).go()
+            VirtualDesktop(1).go()
             if logger:
-                logger.registrar("Passo 1: 3ª área de trabalho pronta e focada.")
+                logger.registrar("Passo 1: Ambiente configurado na 1ª Área de Trabalho.")
         except Exception as e:
             if logger:
-                logger.registrar("Erro ao gerenciar áreas virtuais", e)
+                logger.registrar("Aviso ao alternar para a 1ª área de trabalho", e)
+
+
+def garantir_fortes_aberto(caminho_fortes: str, timeout: int = 120, logger: Logger = None):
+    """
+    Verifica se o Fortes AC está em execução.
+    - Se já estiver aberto: restaura (caso minimizado) e foca.
+    - Se estiver fechado: abre o programa e aguarda o carregamento da janela.
+    """
+    termos_fortes = ("Setor Contábil", "Fortes", "logon")
+
+    # 1. Verifica se já existe uma janela ativa
+    janela_existente = WindowManager.buscar_janela_por_titulo(termos_fortes)
+    if janela_existente:
+        hwnd, titulo = janela_existente
+        WindowManager.focar_e_restaurar(hwnd)
+        if logger:
+            logger.registrar(f"Fortes AC já localizado ('{titulo}'). Janela restaurada e focada.")
+        return janela_existente
+
+    # 2. Caso não exista, inicia o processo e aguarda com a função esperar_tela
+    if logger:
+        logger.registrar("Fortes AC não encontrado em execução. Iniciando o sistema...")
+    
+    os.startfile(caminho_fortes)
+
+    janela_carregada = esperar_tela(termos_fortes, timeout=timeout)
+    if janela_carregada:
+        hwnd, titulo = janela_carregada
+        WindowManager.focar_e_restaurar(hwnd)
+        if logger:
+            logger.registrar(f"Fortes AC detectado e pronto ('{titulo}').")
+        return janela_carregada
+
+    if logger:
+        logger.registrar("❌ Limite de tempo excedido: A janela do Fortes AC não abriu.")
+    return None
 
 
 # ==============================================================================
-# CLASSE PRINCIPAL: AUTOMAÇÃO DO FORTES AC (ORDEM CRONOLÓGICA)
+# CLASSE PRINCIPAL: AUTOMAÇÃO DO FORTES AC (AÇÕES DE INTERFACE)
 # ==============================================================================
 
 class FortesAutomator:
-    """Encapsula as ações do usuário no Fortes AC recebendo parâmetros dinâmicos."""
+    """Encapsula as interações com o sistema Fortes AC."""
 
     def __init__(self, logger: Logger):
         self.logger = logger
 
     # --------------------------------------------------------------------------
-    # PASSO 2: AUTENTICAÇÃO E LOGON (PARÂMETROS DINÂMICOS)
+    # PASSO 2: LOGON
     # --------------------------------------------------------------------------
     def realizar_logon(self, hwnd_logon, usuario: str, senha: str) -> bool:
-        """
-        Preenche as credenciais passadas via argumento e confirma o login com F9.
-        """
+        """Preenche os campos de usuário/senha e envia F9."""
         try:
             edits = []
 
@@ -147,7 +181,7 @@ class FortesAutomator:
             pausa_curta(0.1)
             win32api.keybd_event(win32con.VK_F9, 0, win32con.KEYEVENTF_KEYUP, 0)
 
-            self.logger.registrar(f"Passo 2: Logon do usuário '{usuario}' preenchido e confirmado com F9.")
+            self.logger.registrar(f"Passo 2: Logon do usuário '{usuario}' preenchido e confirmado.")
             return True
         except Exception as e:
             self.logger.registrar("Erro na rotina de logon", e)
@@ -157,14 +191,14 @@ class FortesAutomator:
     # PASSO 3: SELEÇÃO DE EMPRESA
     # --------------------------------------------------------------------------
     def _trocar_empresa_no_fortes(self, codigo_empresa: str | int) -> bool:
-        """Executa o atalho Ctrl+E e digita o código numérico da empresa."""
+        """Executa o atalho Ctrl+E e envia o código numérico da empresa."""
         str_codigo = str(codigo_empresa).strip()
 
         if not str_codigo.isdigit():
             self.logger.registrar(f"❌ O código '{codigo_empresa}' deve conter apenas números.")
             return False
 
-        janela_fortes = WindowManager.buscar_janela_por_titulo("Setor Contábil") or WindowManager.buscar_janela_por_titulo("Fortes")
+        janela_fortes = WindowManager.buscar_janela_por_titulo(("Setor Contábil", "Fortes"))
         if not janela_fortes:
             self.logger.registrar("❌ Tela do Fortes AC não encontrada para trocar empresa.")
             return False
@@ -195,9 +229,7 @@ class FortesAutomator:
         return True
 
     def escolher_empresa(self, empresas: int | str | list | tuple = None) -> bool:
-        """
-        Gerencia a escolha de empresas aceitando input do usuário, valor único ou lista.
-        """
+        """Gerencia a escolha de empresa por entrada direta, item único ou lista."""
         if empresas is None:
             self.logger.registrar("Aguardando entrada do usuário via terminal...")
             entrada = input("👉 Digite o número da empresa desejada: ").strip()
@@ -216,12 +248,10 @@ class FortesAutomator:
             return self._trocar_empresa_no_fortes(empresas)
 
     # --------------------------------------------------------------------------
-    # PASSO 4: PARAMETRIZAÇÃO DO BALANCETE (PARÂMETROS DINÂMICOS)
+    # PASSO 4: PARAMETRIZAÇÃO DO BALANCETE
     # --------------------------------------------------------------------------
     def preencher_balancete(self, data_inicio: str, data_fim: str, opcao: str):
-        """
-        Preenche as datas de início/fim e a opção de filtro passadas por parâmetro.
-        """
+        """Preenche o período do relatório e a opção de filtro."""
         pausa_curta(0.5)
         pyautogui.press('tab', presses=2, interval=0.1)
         pyautogui.write(str(data_inicio), interval=0.05)
@@ -234,12 +264,10 @@ class FortesAutomator:
         self.logger.registrar(f"Passo 4: Balancete parametrizado ({data_inicio} a {data_fim}, Opção: {opcao}).")
 
     # --------------------------------------------------------------------------
-    # PASSO 5: PRÉ-VISUALIZAÇÃO E EXPORTAÇÃO (PARÂMETROS DINÂMICOS)
+    # PASSO 5: EXPORTAÇÃO
     # --------------------------------------------------------------------------
     def gerar_balancete(self, pos_x: int = 93, pos_y: int = 78, letra_atalho: str = 'd') -> bool:
-        """
-        Aguarda a pré-visualização, clica nas coordenadas configuradas e salva o arquivo.
-        """
+        """Aguarda a tela de pré-visualização, clica nas coordenadas e executa o salvamento."""
         self.logger.registrar("Aguardando tela 'Pré-visualização' (tempo limite: 1 min)...")
         janela_preview = esperar_tela("Pré-visualização")
 
@@ -251,7 +279,6 @@ class FortesAutomator:
         WindowManager.focar_e_restaurar(hwnd_preview)
         pausa_curta(0.5)
 
-        # Clique dinâmico na coordenada de exportação
         pyautogui.click(x=pos_x, y=pos_y)
         self.logger.registrar(f"Clique na exportação (X={pos_x}, Y={pos_y}) realizado.")
 
@@ -266,7 +293,6 @@ class FortesAutomator:
         WindowManager.focar_e_restaurar(hwnd_salvar)
         pausa_curta(0.5)
 
-        # Sequência de atalhos e navegação por teclado (preservada)
         pyautogui.press('tab')
         pausa_curta(0.1)
         pyautogui.hotkey('shift', 'tab')
