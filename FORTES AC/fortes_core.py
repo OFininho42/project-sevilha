@@ -6,7 +6,6 @@ import win32api
 import win32con
 import win32gui
 import pyautogui
-from pyvda import VirtualDesktop
 
 # ==============================================================================
 # BLOCO 0: UTILITÁRIOS E INFRAESTRUTURA (MICROFUNÇÕES E LOGS)
@@ -40,11 +39,17 @@ class WindowManager:
 
     @staticmethod
     def buscar_janela_por_titulo(termo_busca: str | tuple | list):
-        """Busca qualquer janela visível que contenha o termo informado."""
+        """
+        Busca qualquer janela visível que contenha os termos informados,
+        ignorando janelas do editor de código ou do terminal de comando.
+        """
         if isinstance(termo_busca, str):
             termos = [termo_busca.lower()]
         else:
             termos = [t.lower() for t in termo_busca]
+
+        # Evita identificar o próprio VS Code ou Terminal como a janela do Fortes
+        titulos_ignorados = [".py", "visual studio code", "cmd.exe", "powershell", "windows powershell"]
 
         resultado = []
         def callback(hwnd, extra):
@@ -52,6 +57,12 @@ class WindowManager:
                 titulo = win32gui.GetWindowText(hwnd)
                 if titulo:
                     titulo_lower = titulo.lower()
+                    
+                    # Se for a janela do editor ou terminal, pula
+                    if any(ignorar in titulo_lower for ignorar in titulos_ignorados):
+                        return True
+
+                    # Verifica se contém algum dos termos buscados
                     if any(termo in titulo_lower for termo in termos):
                         resultado.append((hwnd, titulo))
             return True
@@ -69,7 +80,7 @@ class WindowManager:
 
 
 def esperar_tela(termo_busca: str | tuple | list, timeout: int = 60, intervalo: float = 0.5):
-    """Aguarda o surgimento de uma janela dentro do tempo limite."""
+    """Aguarda o surgimento de uma janela dentro do tempo limite estipulado."""
     tempo_inicio = time.time()
     while (time.time() - tempo_inicio) < timeout:
         janela = WindowManager.buscar_janela_por_titulo(termo_busca)
@@ -80,40 +91,34 @@ def esperar_tela(termo_busca: str | tuple | list, timeout: int = 60, intervalo: 
 
 
 # ==============================================================================
-# PASSO 1: GERENCIAMENTO DE AMBIENTE E INICIALIZAÇÃO
+# PASSO 1: GERENCIAMENTO E ABERTURA DO FORTES AC
 # ==============================================================================
 
-class DesktopManager:
-    """Garante a execução no Desktop principal (Área de Trabalho 1)."""
-
-    @staticmethod
-    def ir_para_primeira_area(logger: Logger = None):
-        try:
-            VirtualDesktop(1).go()
-            if logger:
-                logger.registrar("Passo 1: Ambiente configurado na 1ª Área de Trabalho.")
-        except Exception as e:
-            if logger:
-                logger.registrar("Aviso ao alternar para a 1ª área de trabalho", e)
-
-
 def garantir_fortes_aberto(caminho_fortes: str, timeout: int = 120, logger: Logger = None):
-    """Verifica se o Fortes AC está em execução ou o inicia se estivar fechado."""
-    termos_fortes = ("Setor Contábil", "Fortes", "logon")
+    """
+    Procura a janela do Fortes AC entre as janelas abertas no Windows.
+    - Se encontrar: Restaura (caso minimizada) e traz para o foco.
+    - Se não encontrar: Inicia o executável via atalho e aguarda a janela carregar.
+    """
+    # Termos específicos da aplicação Fortes AC
+    termos_fortes = ("setor contábil", "fortes ac", "logon")
 
+    # 1. Procura se a janela do sistema já está aberta
     janela_existente = WindowManager.buscar_janela_por_titulo(termos_fortes)
     if janela_existente:
         hwnd, titulo = janela_existente
         WindowManager.focar_e_restaurar(hwnd)
         if logger:
-            logger.registrar(f"Fortes AC já localizado ('{titulo}'). Janela restaurada e focada.")
+            logger.registrar(f"Fortes AC localizado ('{titulo}'). Janela restaurada e focada.")
         return janela_existente
 
+    # 2. Se não encontrou a janela, executa o atalho do sistema
     if logger:
-        logger.registrar("Fortes AC não encontrado em execução. Iniciando o sistema...")
+        logger.registrar("Janela do Fortes AC não encontrada. Executando o sistema...")
     
     os.startfile(caminho_fortes)
 
+    # 3. Looping de espera até que a janela do sistema seja aberta
     janela_carregada = esperar_tela(termos_fortes, timeout=timeout)
     if janela_carregada:
         hwnd, titulo = janela_carregada
@@ -132,7 +137,7 @@ def garantir_fortes_aberto(caminho_fortes: str, timeout: int = 120, logger: Logg
 # ==============================================================================
 
 class FortesAutomator:
-    """Encapsula as interações com o sistema Fortes AC."""
+    """Encapsula as interações com a interface do sistema Fortes AC."""
 
     def __init__(self, logger: Logger):
         self.logger = logger
@@ -180,7 +185,7 @@ class FortesAutomator:
             self.logger.registrar(f"❌ O código '{codigo_empresa}' deve conter apenas números.")
             return False
 
-        janela_fortes = WindowManager.buscar_janela_por_titulo(("Setor Contábil", "Fortes"))
+        janela_fortes = WindowManager.buscar_janela_por_titulo(("Setor Contábil", "Fortes AC"))
         if not janela_fortes:
             self.logger.registrar("❌ Tela do Fortes AC não encontrada para trocar empresa.")
             return False
@@ -254,14 +259,7 @@ class FortesAutomator:
     ) -> bool:
         """
         Aguarda a pré-visualização, seleciona a opção, abre a janela de destino
-        e salva o arquivo no caminho e com o nome definidos.
-        
-        Parâmetros:
-        - caminho_pasta (str): Pasta de destino onde o arquivo será gravado.
-        - nome_arquivo (str): Nome do arquivo final (ex: 'Balancete_102.pdf').
-        - pos_x, pos_y (int): Coordenadas do botão de exportação.
-        - letra_atalho (str): Tecla enviada no menu de salvamento.
-        - pos_btn_x, pos_btn_y (int): Coordenadas para abrir a janela de seleção do arquivo.
+        e salva o arquivo no caminho e nome definidos.
         """
         self.logger.registrar("Aguardando tela 'Pré-visualização' (tempo limite: 1 min)...")
         janela_preview = esperar_tela("Pré-visualização")
@@ -274,7 +272,6 @@ class FortesAutomator:
         WindowManager.focar_e_restaurar(hwnd_preview)
         pausa_curta(0.5)
 
-        # 1. Clique no botão de exportação na pré-visualização
         pyautogui.click(x=pos_x, y=pos_y)
         self.logger.registrar(f"Clique na exportação (X={pos_x}, Y={pos_y}) realizado.")
 
@@ -289,7 +286,6 @@ class FortesAutomator:
         WindowManager.focar_e_restaurar(hwnd_salvar)
         pausa_curta(0.5)
 
-        # 2. Configura a opção do atalho e clica no botão para definir caminho
         pyautogui.press('tab')
         pausa_curta(0.1)
         pyautogui.hotkey('shift', 'tab')
@@ -303,14 +299,12 @@ class FortesAutomator:
         self.logger.registrar(f"Clique no botão de caminho/arquivo (X={pos_btn_x}, Y={pos_btn_y}) realizado.")
         pausa_curta(0.8)
 
-        # 3. Monta o caminho completo e insere na janela do Windows
         caminho_completo = os.path.join(caminho_pasta, nome_arquivo)
         os.makedirs(caminho_pasta, exist_ok=True)
         
         pyautogui.write(caminho_completo, interval=0.03)
         pausa_curta(0.3)
 
-        # 4. Três tabs e confirmação final
         pyautogui.press('tab', presses=3, interval=0.1)
         pausa_curta(0.2)
         pyautogui.press('enter')
