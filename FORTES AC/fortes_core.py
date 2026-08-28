@@ -40,10 +40,7 @@ class WindowManager:
 
     @staticmethod
     def buscar_janela_por_titulo(termo_busca: str | tuple | list):
-        """
-        Busca qualquer janela visível que contenha o termo informado.
-        Aceita uma única string ou uma lista/tupla de termos.
-        """
+        """Busca qualquer janela visível que contenha o termo informado."""
         if isinstance(termo_busca, str):
             termos = [termo_busca.lower()]
         else:
@@ -72,10 +69,7 @@ class WindowManager:
 
 
 def esperar_tela(termo_busca: str | tuple | list, timeout: int = 60, intervalo: float = 0.5):
-    """
-    Aguarda o surgimento de uma janela dentro do tempo limite.
-    Reaproveita o mecanismo de busca unificado do WindowManager.
-    """
+    """Aguarda o surgimento de uma janela dentro do tempo limite."""
     tempo_inicio = time.time()
     while (time.time() - tempo_inicio) < timeout:
         janela = WindowManager.buscar_janela_por_titulo(termo_busca)
@@ -104,14 +98,9 @@ class DesktopManager:
 
 
 def garantir_fortes_aberto(caminho_fortes: str, timeout: int = 120, logger: Logger = None):
-    """
-    Verifica se o Fortes AC está em execução.
-    - Se já estiver aberto: restaura (caso minimizado) e foca.
-    - Se estiver fechado: abre o programa e aguarda o carregamento da janela.
-    """
+    """Verifica se o Fortes AC está em execução ou o inicia se estivar fechado."""
     termos_fortes = ("Setor Contábil", "Fortes", "logon")
 
-    # 1. Verifica se já existe uma janela ativa
     janela_existente = WindowManager.buscar_janela_por_titulo(termos_fortes)
     if janela_existente:
         hwnd, titulo = janela_existente
@@ -120,7 +109,6 @@ def garantir_fortes_aberto(caminho_fortes: str, timeout: int = 120, logger: Logg
             logger.registrar(f"Fortes AC já localizado ('{titulo}'). Janela restaurada e focada.")
         return janela_existente
 
-    # 2. Caso não exista, inicia o processo e aguarda com a função esperar_tela
     if logger:
         logger.registrar("Fortes AC não encontrado em execução. Iniciando o sistema...")
     
@@ -149,9 +137,6 @@ class FortesAutomator:
     def __init__(self, logger: Logger):
         self.logger = logger
 
-    # --------------------------------------------------------------------------
-    # PASSO 2: LOGON
-    # --------------------------------------------------------------------------
     def realizar_logon(self, hwnd_logon, usuario: str, senha: str) -> bool:
         """Preenche os campos de usuário/senha e envia F9."""
         try:
@@ -187,9 +172,6 @@ class FortesAutomator:
             self.logger.registrar("Erro na rotina de logon", e)
             return False
 
-    # --------------------------------------------------------------------------
-    # PASSO 3: SELEÇÃO DE EMPRESA
-    # --------------------------------------------------------------------------
     def _trocar_empresa_no_fortes(self, codigo_empresa: str | int) -> bool:
         """Executa o atalho Ctrl+E e envia o código numérico da empresa."""
         str_codigo = str(codigo_empresa).strip()
@@ -247,9 +229,6 @@ class FortesAutomator:
         else:
             return self._trocar_empresa_no_fortes(empresas)
 
-    # --------------------------------------------------------------------------
-    # PASSO 4: PARAMETRIZAÇÃO DO BALANCETE
-    # --------------------------------------------------------------------------
     def preencher_balancete(self, data_inicio: str, data_fim: str, opcao: str):
         """Preenche o período do relatório e a opção de filtro."""
         pausa_curta(0.5)
@@ -263,11 +242,27 @@ class FortesAutomator:
         pyautogui.press('enter')
         self.logger.registrar(f"Passo 4: Balancete parametrizado ({data_inicio} a {data_fim}, Opção: {opcao}).")
 
-    # --------------------------------------------------------------------------
-    # PASSO 5: EXPORTAÇÃO
-    # --------------------------------------------------------------------------
-    def gerar_balancete(self, pos_x: int = 93, pos_y: int = 78, letra_atalho: str = 'd') -> bool:
-        """Aguarda a tela de pré-visualização, clica nas coordenadas e executa o salvamento."""
+    def gerar_balancete(
+        self,
+        caminho_pasta: str,
+        nome_arquivo: str,
+        pos_x: int = 93,
+        pos_y: int = 78,
+        letra_atalho: str = 'd',
+        pos_btn_x: int = 1172,
+        pos_btn_y: int = 454
+    ) -> bool:
+        """
+        Aguarda a pré-visualização, seleciona a opção, abre a janela de destino
+        e salva o arquivo no caminho e com o nome definidos.
+        
+        Parâmetros:
+        - caminho_pasta (str): Pasta de destino onde o arquivo será gravado.
+        - nome_arquivo (str): Nome do arquivo final (ex: 'Balancete_102.pdf').
+        - pos_x, pos_y (int): Coordenadas do botão de exportação.
+        - letra_atalho (str): Tecla enviada no menu de salvamento.
+        - pos_btn_x, pos_btn_y (int): Coordenadas para abrir a janela de seleção do arquivo.
+        """
         self.logger.registrar("Aguardando tela 'Pré-visualização' (tempo limite: 1 min)...")
         janela_preview = esperar_tela("Pré-visualização")
 
@@ -279,6 +274,7 @@ class FortesAutomator:
         WindowManager.focar_e_restaurar(hwnd_preview)
         pausa_curta(0.5)
 
+        # 1. Clique no botão de exportação na pré-visualização
         pyautogui.click(x=pos_x, y=pos_y)
         self.logger.registrar(f"Clique na exportação (X={pos_x}, Y={pos_y}) realizado.")
 
@@ -293,14 +289,31 @@ class FortesAutomator:
         WindowManager.focar_e_restaurar(hwnd_salvar)
         pausa_curta(0.5)
 
+        # 2. Configura a opção do atalho e clica no botão para definir caminho
         pyautogui.press('tab')
         pausa_curta(0.1)
         pyautogui.hotkey('shift', 'tab')
         pausa_curta(0.1)
         pyautogui.press(str(letra_atalho))
         pausa_curta(0.1)
-        pyautogui.press('tab', presses=4, interval=0.1)
+        pyautogui.press('tab')
+        pausa_curta(0.2)
+
+        pyautogui.click(x=pos_btn_x, y=pos_btn_y)
+        self.logger.registrar(f"Clique no botão de caminho/arquivo (X={pos_btn_x}, Y={pos_btn_y}) realizado.")
+        pausa_curta(0.8)
+
+        # 3. Monta o caminho completo e insere na janela do Windows
+        caminho_completo = os.path.join(caminho_pasta, nome_arquivo)
+        os.makedirs(caminho_pasta, exist_ok=True)
+        
+        pyautogui.write(caminho_completo, interval=0.03)
+        pausa_curta(0.3)
+
+        # 4. Três tabs e confirmação final
+        pyautogui.press('tab', presses=3, interval=0.1)
+        pausa_curta(0.2)
         pyautogui.press('enter')
 
-        self.logger.registrar("Passo 5: Balancete gerado e salvo com sucesso.")
+        self.logger.registrar(f"Passo 5: Balancete gerado e salvo em '{caminho_completo}'.")
         return True
