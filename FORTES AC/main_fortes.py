@@ -1,6 +1,7 @@
 import os
 import time
-from fortes_core import Logger, WindowManager, DesktopManager, FortesAutomator
+# Adicionada a função 'esperar_tela' no bloco de importação
+from fortes_core import Logger, WindowManager, DesktopManager, FortesAutomator, esperar_tela
 
 def rodar_automacao():
     logger = Logger()
@@ -13,8 +14,8 @@ def rodar_automacao():
     caminho_fortes = r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Fortes AC"
     os.startfile(caminho_fortes)
 
-    # 3. Aguardar e Realizar Logon
-    janela_logon = WindowManager.aguardar_janela("logon", timeout=120)
+    # 3. Aguardar e Realizar Logon (usando a função esperar_tela)
+    janela_logon = esperar_tela("logon", timeout=120)
     if janela_logon:
         hwnd_logon, _ = janela_logon
         automator.realizar_logon(hwnd_logon, usuario="ROBOCONT", senha="123")

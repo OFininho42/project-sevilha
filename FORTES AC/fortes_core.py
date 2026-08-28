@@ -108,16 +108,18 @@ class DesktopManager:
 # ==============================================================================
 
 class FortesAutomator:
-    """Encapsula as ações do usuário no Fortes AC em ordem sequencial."""
+    """Encapsula as ações do usuário no Fortes AC recebendo parâmetros dinâmicos."""
 
     def __init__(self, logger: Logger):
         self.logger = logger
 
     # --------------------------------------------------------------------------
-    # PASSO 2: AUTENTICAÇÃO E LOGON
+    # PASSO 2: AUTENTICAÇÃO E LOGON (PARÂMETROS DINÂMICOS)
     # --------------------------------------------------------------------------
-    def realizar_logon(self, hwnd_logon, usuario: str = "ROBOCONT", senha: str = "123") -> bool:
-        """Preenche o usuário e senha na tela inicial e envia a tecla F9."""
+    def realizar_logon(self, hwnd_logon, usuario: str, senha: str) -> bool:
+        """
+        Preenche as credenciais passadas via argumento e confirma o login com F9.
+        """
         try:
             edits = []
 
@@ -145,7 +147,7 @@ class FortesAutomator:
             pausa_curta(0.1)
             win32api.keybd_event(win32con.VK_F9, 0, win32con.KEYEVENTF_KEYUP, 0)
 
-            self.logger.registrar("Passo 2: Logon preenchido e confirmado com F9.")
+            self.logger.registrar(f"Passo 2: Logon do usuário '{usuario}' preenchido e confirmado com F9.")
             return True
         except Exception as e:
             self.logger.registrar("Erro na rotina de logon", e)
@@ -214,26 +216,30 @@ class FortesAutomator:
             return self._trocar_empresa_no_fortes(empresas)
 
     # --------------------------------------------------------------------------
-    # PASSO 4: PARAMETRIZAÇÃO DO BALANCETE
+    # PASSO 4: PARAMETRIZAÇÃO DO BALANCETE (PARÂMETROS DINÂMICOS)
     # --------------------------------------------------------------------------
-    def preencher_balancete(self, data_inicio: str = '01012025', data_fim: str = '31122025', opcao: str = '1'):
-        """Preenche o período e o filtro da tela de Balancete."""
+    def preencher_balancete(self, data_inicio: str, data_fim: str, opcao: str):
+        """
+        Preenche as datas de início/fim e a opção de filtro passadas por parâmetro.
+        """
         pausa_curta(0.5)
         pyautogui.press('tab', presses=2, interval=0.1)
-        pyautogui.write(data_inicio, interval=0.05)
+        pyautogui.write(str(data_inicio), interval=0.05)
         pyautogui.press('tab', interval=0.1)
-        pyautogui.write(data_fim, interval=0.05)
+        pyautogui.write(str(data_fim), interval=0.05)
         pyautogui.press('tab', presses=4, interval=0.1)
-        pyautogui.write(opcao, interval=0.05)
+        pyautogui.write(str(opcao), interval=0.05)
         pyautogui.press('tab', interval=0.1)
         pyautogui.press('enter')
-        self.logger.registrar("Passo 4: Parâmetros do Balancete preenchidos.")
+        self.logger.registrar(f"Passo 4: Balancete parametrizado ({data_inicio} a {data_fim}, Opção: {opcao}).")
 
     # --------------------------------------------------------------------------
-    # PASSO 5: PRE-VISUALIZAÇÃO E EXPORTAÇÃO
+    # PASSO 5: PRÉ-VISUALIZAÇÃO E EXPORTAÇÃO (PARÂMETROS DINÂMICOS)
     # --------------------------------------------------------------------------
-    def gerar_balancete(self) -> bool:
-        """Aguarda a pré-visualização do relatório, clica para exportar e salva o arquivo."""
+    def gerar_balancete(self, pos_x: int = 93, pos_y: int = 78, letra_atalho: str = 'd') -> bool:
+        """
+        Aguarda a pré-visualização, clica nas coordenadas configuradas e salva o arquivo.
+        """
         self.logger.registrar("Aguardando tela 'Pré-visualização' (tempo limite: 1 min)...")
         janela_preview = esperar_tela("Pré-visualização")
 
@@ -245,9 +251,9 @@ class FortesAutomator:
         WindowManager.focar_e_restaurar(hwnd_preview)
         pausa_curta(0.5)
 
-        # Clique na coordenada de exportação
-        pyautogui.click(x=93, y=78)
-        self.logger.registrar("Clique na exportação (X=93, Y=78) realizado.")
+        # Clique dinâmico na coordenada de exportação
+        pyautogui.click(x=pos_x, y=pos_y)
+        self.logger.registrar(f"Clique na exportação (X={pos_x}, Y={pos_y}) realizado.")
 
         self.logger.registrar("Aguardando janela 'Salvar' (tempo limite: 1 min)...")
         janela_salvar = esperar_tela("Salvar")
@@ -260,12 +266,12 @@ class FortesAutomator:
         WindowManager.focar_e_restaurar(hwnd_salvar)
         pausa_curta(0.5)
 
-        # Sequência de comandos de salvamento
+        # Sequência de atalhos e navegação por teclado (preservada)
         pyautogui.press('tab')
         pausa_curta(0.1)
         pyautogui.hotkey('shift', 'tab')
         pausa_curta(0.1)
-        pyautogui.press('d')
+        pyautogui.press(str(letra_atalho))
         pausa_curta(0.1)
         pyautogui.press('tab', presses=4, interval=0.1)
         pyautogui.press('enter')
